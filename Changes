@@ -20,3 +20,7 @@ Revision history for Perl extension Tie::LazyList.
 
 0.04  Tue Jul 10 00:17 2001
 	- POD fixed a bit
+
+0.05  Sat Jul 14 21:16 2001
+	- Added option to create tied array from another array already tied to Tie::LazyList
+	- POD fixed

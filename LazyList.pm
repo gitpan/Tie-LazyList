@@ -13,7 +13,7 @@ our @ISA         = qw( Exporter );
 our %EXPORT_TAGS = ( 'all' => [ qw() ] );
 our @EXPORT_OK   = ( @{ $EXPORT_TAGS{'all'} } );
 our @EXPORT      = qw();
-our $VERSION     = '0.04';
+our $VERSION     = '0.05';
 
 
 # debug variable that may be set to see the debug messages
@@ -132,42 +132,95 @@ my %CODES_ABBREV =
 	);
 
 
+
 sub TIEARRAY {
 	local $_;
 	my $class          = shift   or croak "Undefined class !";
 	defined ( my $init = shift ) or croak "Undefined array init !"; # may be a scalar or ARRAY ref
-	my $code           = shift   or croak "Undefined code !";       # may be a scalar or CODE  ref
-	my ( @arr, $code_ref, $array_ref );
 
-	# setting @arr
+	# List's initialization variables to be set now :
+	my ( @arr,         # list's main array, should be initialized
+	     $code_ref );  # list's generation function
+
+	# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	# setting @arr and, possibly, $code_ref ( $code_ref will be set if the init
+	# passed is a reference to another array tied to LazyList )
+
 	my $ref = ref $init;
-	unless ( $ref ){               # scalar variable
+
+	unless ( $ref ){
+		# init is a simple scalar variable
 		@arr = ( $init );
-	} elsif ( $ref eq 'ARRAY' ){   # ARAY ref
-		@arr = @{ $init };
+	} elsif ( $ref eq 'ARRAY' ){
+		# init is a reference to ARRAY and it may be :
+		# 1) ref to another array tied to LazyList
+		# 2) ref to a usual Perl array
+		my $tied_object = tied @{ $init };
+		if ( defined $tied_object ){
+			# 1)
+			$tied_object->isa( $class )
+				or croak "Reference to a tied object passed which isn't a [$class] instance !";
+			# taking the initialization data from this tied object : init_array and code
+			my ( $init_array, $code ) = $tied_object->_init_data();
+			@arr      = @{ $init_array };
+			$code_ref = $code;
+		}
+		else {
+			# 2)
+			@arr = @{ $init };
+		}
 	} else {
-		croak "Unknown referenece [$ref] passed for initializing the list !";
+		# init is an unexpected reference
+		croak "Unknown [$ref] referenece passed for initializing the list !";
 	}
 
-	# setting $code_ref and, possibly, @arr again
-	$ref = ref $code;
-	unless ( $ref ){               # scalar variable, should be one of predefined abbreviations
-		exists $CODES_ABBREV{ $code } or croak "Unknown scalar [$code] passed as code abbreviation !";
-		# getting the code_ref and, possibly, array_ref for the new array
-		( $code_ref, $array_ref ) = $CODES_ABBREV{ $code }->( \@arr );
-		@arr = @{ $array_ref } if defined $array_ref;
-		# sanity-check of result code reference
-		ref $code_ref eq 'CODE' or die "Failed to successfully initialize code reference ! \a\n";
-	} elsif ( $ref eq 'CODE' ){    # CODE ref
-		$code_ref = $code;
-	} else {
-		croak "Unknown reference [$ref] passed as a code !";
+
+	# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	# setting $code_ref ( if it wasn't set by above block ) and, possibly, @arr again
+	# ( @arr will be set again if the code abbreviation that was used will return a
+	# new array when fetched from the code's table )
+
+	unless ( defined $code_ref ){
+
+      # code is sitting in @_ and should be a scalar or CODE ref
+      my $code = shift or croak "Undefined code !";
+		my $ref  = ref $code;
+
+		unless ( $ref ){
+			# code is a scalar variable, should be one of the predefined code abbreviations
+			exists $CODES_ABBREV{ $code } or croak "Unknown scalar [$code] passed as code abbreviation !";
+			# getting the code and, possibly, array_ref for the new array
+			my ( $returned_code, $array_ref ) = $CODES_ABBREV{ $code }->( \@arr );
+			$code_ref = $returned_code;
+			@arr      = @{ $array_ref } if defined $array_ref;
+		} elsif ( $ref eq 'CODE' ){
+			# code is a CODE reference
+			$code_ref = $code;
+		} else {
+			# code is an unexpected reference
+			croak "Unknown [$code_ref] reference passed as a code !";
+		}
 	}
 
-	bless { array    => \@arr,
-	        code     => $code_ref,
-	        'length' => scalar @arr },
+	# sanity-check of result initializations
+	ref [ @arr ]  eq 'ARRAY' or die "Failed to successfully initialize the array ! \a";
+	ref $code_ref eq 'CODE'  or die "Failed to successfully initialize code reference ! \a";
+
+
+	bless { array      => \@arr,         # the main list that will be used and expanded
+			  init_array => \@arr,         # keeping the initialization array
+	        code       => $code_ref,     # the generation function
+	        'length'   => scalar @arr }, # the current length, will be updated every time it changes
 			$class;
+}
+
+
+# returns the init_array ref and the code ref ( used for creating
+# another tied array, initialized exactly as this one )
+sub _init_data {
+	local $_;
+	my $self = shift;
+	@{ $self }{ qw ( init_array code ) };
 }
 
 
@@ -305,31 +358,34 @@ Tie::LazyList - Perl extension for lazy lists growing on demand
 
   use Tie::LazyList;
 
-  my ( @arr, @arr2 );
-
   # lazy list of factorials
   tie @arr,  'Tie::LazyList', [ 1 ], 'FACT';
   tie @arr2, 'Tie::LazyList', 1, sub { my ( $array_ref, $n ) = @_; $array_ref->[ $n - 1 ] * $n };
-  print "$_\n" for @arr;   # prints ( eternally ) 1!, 2!, 3! ..
+  tie @arr3, 'Tie::LazyList', \@arr;
+  print "$_\n" for @arr;   # prints ( eternally ) values of 1!, 2!, 3! ..
   print "$_\n" for @arr2;  # the same
+  print "$_\n" for @arr3;  # the same
 
   # lazy list of powers of 2
   tie @arr,  'Tie::LazyList', 2, 'POW';
   tie @arr2, 'Tie::LazyList', 1, sub { my ( $array_ref, $n ) = @_; $array_ref->[ $n - 1 ] * 2 };
+  tie @arr3, 'Tie::LazyList', \@arr2;
   print $arr [ 10 ], "\n", # prints 1024 = 2^10
-        $arr2[ 10 ], "\n"; # the same
+        $arr2[ 10 ], "\n", # the same
+        $arr3[ 10 ], "\n"; # the same
 
   # lasy lists of Fibonacci numbers, arithmetical/geometrical progressions and their sums, etc ..
 
 =head1 DESCRIPTION
 
-C<Tie::LazyList> allows you to create lazy lists ( "infinite lists, whose tail remain unevaluated", Watt )
+C<Tie::LazyList> allows you to create B<lazy lists> ( E<quot>infinite lists, whose tail remain
+unevaluatedE<quot>, Watt )
 growing on demand with user-defined generation function.
 
 What you have is a usual Perl array whose elements are generated by some function and which may be
 accessed by C<$arr[x]> as any other, but actually grows I<under the hood> if the element
 you're accessing isn't generated yet.
-This way, the amount of memory wasted for the list is no more ( and no less, unfortunately ) then you need.
+This way, the amount of memory wasted for the array is no more ( and no less, unfortunately ) then you need.
 Think about it as dynamically growing factorials ( Fibonacci numbers, arithmetic progression .. ) table
 which you can access for any element without need to explicitly build and maintain it.
 
@@ -339,6 +395,10 @@ go and work with it ! See the example above - I think, they demonstrate the simp
 So, here are the rules : you create the new lazy list by
 
 C<tie @array, 'Tie::LazyList'>, C<list init>, C<generation function>
+
+or
+
+C<tie @array, 'Tie::LazyList',> C<ARRAY reference>
 
 where
 
@@ -408,35 +468,63 @@ Means B<pow>er - arising C<x> to any power, C<list init> should contain only num
 
 =item ???
 
-I'm not a mathematician .. may be you have more ideas ? Send them to genie@cpan.org !
+I'm not a mathematician .. If you have more ideas, send them to genie@cpan.org !
 
 =back
+
+=item C<ARRAY reference>
+
+Reference to another array, already tied to C<Tie::LazyList>.
 
 =back
 
 =head2 EXAMPLES
 
   # lazy list of fractions 1/(2^n) - 1, 1/2, 1/4, 1/8 ..
-  tie @array, 'Tie::LazyList', 1, sub { my( $array_ref, $n ) = @_; $array_ref->[ $n - 1 ] / 2 };
+  tie @array,  'Tie::LazyList', 1, sub { my( $array_ref, $n ) = @_; $array_ref->[ $n - 1 ] / 2 };
+
   # the same
-  tie @array, 'Tie::LazyList', [ 1, 0.5 ], 'GPROG';
+  tie @array,  'Tie::LazyList', [ 1, 0.5 ], 'GPROG';
+
   # lazy list of above geometric progression's summary : arr[ n ] = 1 + 1/2 + 1/4 + .. + 1/(2^n)
-  tie @array, 'Tie::LazyList', [ 1, 0.5 ], 'GPROG_SUM';
+  tie @array,  'Tie::LazyList', [ 1, 0.5 ], 'GPROG_SUM';
+
+  # creating tied array from another tied array
+  tie @array2, 'Tie::LazyList', \@array;
+
   # prints 1.99999904632568 = 1 + 1/2 + 1/4 + .. + 1/(2^20)
   print $array[ 20 ];
 
+  # the same
+  print $array2[ 20 ];
+
+  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
   # lazy list of Fibonacci numbers
   tie @array, 'Tie::LazyList', [ 0, 1 ], 'FIBON';
+
+  # the same
+  tie @arr2,  'Tie::LazyList', \@array;
+
   # prints 13 = 5 + 8
   print $array[ 7 ];
 
+  # the same
+  print $arr2[ 7 ];
+
+  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
   # lazy list of factorials
   tie @array, 'Tie::LazyList', 1, 'FACT';
+
   # prints 1.19785716699699e+100 = 70!
   print $array[ 70 ];
 
+  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
   # lazy list of powers of e
   tie @array, 'Tie::LazyList', 2.718281828, 'POW';
+
   # prints 148.413158977261 = e^5
   print $array[ 5 ];
 
@@ -458,11 +546,11 @@ any sense in lazy lists, others ( like filtering via L<grep> ) may be implemente
 There's a B<C<$Tie::LazyList::locality>> variable stating how many additional list elements should
 be evaluated when expanding it. It's default value is C<10> and it means whenever list should grow
 to index C<n> it'll actually grow to index C<n + 10>.
-You may set it to any number you like - my benchmarks showed that locality equal to C<0> makes
-iteration from C<arr[0]> to C<arr[1e6]> is about 30% slower then iteration from C<arr[1e6]> to C<arr[0]>
-( which is, obviously, the fastest in the total time ).
-Locality equal to C<100> and C<1000> didn't bring any further speedup when iterating over one million
-elements list, so C<10> looks Ok.
+You may set it to any number you like, but note that my benchmarks showed that locality equal to
+C<0> makes iteration from C<arr[0]> to C<arr[1e6]> about 30% slower then iteration from C<arr[1e6]>
+to C<arr[0]> ( which is, obviously, the fastest in the total time ), while iteration with locality equal
+to C<10> showed the same result E<quot>in both directionsE<quot>.
+Locality equal to C<100> and C<1000> didn't bring any further speedup, so C<10> looks Ok.
 
 =head1 TODO
 
@@ -471,10 +559,6 @@ elements list, so C<10> looks Ok.
 =item 1.
 
 Apply L<map> and L<grep> on lazy lists
-
-=item 2.
-
-Copy constructor for lazy lists ?
 
 =back
 
