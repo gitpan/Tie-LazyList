@@ -16,5 +16,7 @@ Revision history for Perl extension Tie::LazyList.
    - code abbreviations added :
      FACT
      POW
-
    - POD written
+
+0.04  Tue Jul 10 00:17 2001
+	- POD fixed a bit

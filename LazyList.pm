@@ -13,7 +13,7 @@ our @ISA         = qw( Exporter );
 our %EXPORT_TAGS = ( 'all' => [ qw() ] );
 our @EXPORT_OK   = ( @{ $EXPORT_TAGS{'all'} } );
 our @EXPORT      = qw();
-our $VERSION     = '0.03';
+our $VERSION     = '0.04';
 
 
 # debug variable that may be set to see the debug messages
@@ -372,7 +372,7 @@ The function should return the value of the C<n>-th array element.
 In order to make our life a bit easier there is a number of, what I call, code abbreviations.
 It means that C<generation function> may be not the code reference, but something much simpler -
 string, having one of the predefined values.
-Those values tells the module which C<generation function> to use and they are :
+Those values tell the module which C<generation function> to use and they are :
 
 =over 4
 
@@ -445,7 +445,7 @@ I'm not a mathematician .. may be you have more ideas ? Send them to genie@cpan.
 Having tied an array what operations can you do with it ? Does it support a usual array operations
 like L<pop>, L<push> and L<splice> ?
 The answer to the first question  - not so many, actually.
-The answer to the second question is shorter - no, it doesn't.
+The answer to the second question is further shorter - no, it doesn't.
 
 The only operations an array tied to C<Tie::LazyList> currently supports are element
 access B<C<$arr[x]>> and B<C<for ( @array )>> eternal iteration I<( isn't it great already ? )>.
@@ -459,8 +459,8 @@ There's a B<C<$Tie::LazyList::locality>> variable stating how many additional li
 be evaluated when expanding it. It's default value is C<10> and it means whenever list should grow
 to index C<n> it'll actually grow to index C<n + 10>.
 You may set it to any number you like - my benchmarks showed that locality equal to C<0> makes
-iteration from C<arr[0]> to C<arr[1e6]> much slower then iteration from C<arr[1e6]> to C<arr[0]>
-( which is, obviously, the fastest in the total time )
+iteration from C<arr[0]> to C<arr[1e6]> is about 30% slower then iteration from C<arr[1e6]> to C<arr[0]>
+( which is, obviously, the fastest in the total time ).
 Locality equal to C<100> and C<1000> didn't bring any further speedup when iterating over one million
 elements list, so C<10> looks Ok.
 
